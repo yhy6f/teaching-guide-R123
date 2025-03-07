@@ -1,13 +1,35 @@
 ---
 title: 'Data cleaning: easy scraping, reformatting and reshaping'
-author: "Liz Lucas, IRE & Yanqi Xu"
+author: "Liz Lucas, IRE & Yanqi Xu & Jasmine Ye Han"
 output: html_document
 ---
+```{r include=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning=FALSE)
+```
 
-Load necessary packages:
+## Intro 
+
+In this session we're going to:
+
+**1. Get data into R!**
+We will scrape an html table and load data from Excel, csv and csv files on the web.
+
+**2. Clean data in R!**
+We will practice cleaning up column names, converting data types, combining multiple data sets, manipulating strings. There's also some reshaping at the end because it's crucial step to get data ready for analysis.
+
+You will walk away with: 
+- basic understanding of loading and cleaning data in R
+- a list of helpful packages and functions
+- some resources for further learning 
+
+## Let's go!
+
+### Load packages
+
+We'll need to load several packages for this class.  
 
 ```{r}
-library(tidyverse) # we'll be using mostly tidyr and stringr packages within the tidyverse
+library(tidyverse) # we'll be using mostly tidyr and stringr packages within the tidyverse, handy for data cleaning and string manipulation respectively.
 library(lubridate) # this package allows us to manipulate dates
 library(here) # easier file paths
 library(readxl) # read and write data from Excel files
@@ -18,29 +40,71 @@ library(rvest) #web scraping
 ```
 
 
-## Loading html table into R
+### Loading/scraping an html table
 
-Let's say a website has the data you need. I wanted to see the percentage of state area with groundwater nitrate contamination and how Nebraska was doing compared to other states. But there's no sort button to view a column in descending order.
+Let's say an EPA webpage has a [table](https://www.epa.gov/nutrientpollution/estimated-nitrate-concentrations-groundwater-used-drinking) with some useful information: the percentage of state area with groundwater nitrate contamination for all states. You want to know how Nebraska is doing compared to other states, but there's no sort button to view a column in descending order. So let's scrape it.
 
+Rvest package can help us do that: 
+- `read_html()` function: 
+  - performs a HTTP request then parses the HTML received with xml2 package, a lower level package that Rvest buils on top of.
+  - returns a xml_document object which you’ll then manipulate using rvest functions. xml_document is a class from xml2 package.
+  
+- `html_element()` function: 
+  - finds HTML element using CSS selectors or XPath expressions
+    
+- `html_table()` function: 
+  - parses an html table into a data frame
+  
+Tips:
+- Right click the page and "inspect" allows you to peak into the HTML tree and find what elements you want. A more detailed tutorial on how to do that  [here](https://rpubs.com/Jasmineyehan/582039)
+- Learn CSS selectors with an interactive game:  https://flukeout.github.io/
+  
 ```{r}
 epa_url <- "https://www.epa.gov/nutrient-policy-data/estimated-nitrate-concentrations-groundwater-used-drinking"
+## creating a variable for the url
 
+epa_tab <- read_html(epa_url) %>% ##read in the html page
+  html_element("table") %>% ##select the "table" element
+  html_table() ##parse the html table into data frame
 
-epa_tab <- read_html(epa_url) %>% html_element("table") %>% html_table()
 # Clean up column names
 names(epa_tab) <- c("state","area","percent","private_perc_2005","private_perc_2015")
-
-epa_tab <- epa_tab %>% mutate(across(2:4, str_remove,",|%")) %>% mutate(across(2:4, as.numeric))
 ```
 
- Loading it into R also lets you create a new column to compare % of residents on a private well in 2015 vs 2005.
+Now you can manipulate the data frame. But first let's check the data types with `str()`.
+
+```{r}
+str(epa_tab)
+```
+Some columns are characteristics, but to perform any sorting they need to be numeric. Let's use the following functions to convert them:
+
+- mutate(): 
+  - let you create new columns that are functions of existing variables
+  - if you just want to create one new column, i.e. based on "area" column: epa_tab <- epa_tab %>% mutate(area = as.numeric(area))
+  
+- across(): 
+  - makes it easy to apply the same transformation to multiple columns
+
+```{r}
+## to double check: epa_tab %>% mutate(across(2:4, as.numeric)) %>% View()
+epa_tab <- epa_tab %>% mutate(across(2:4, as.numeric))
+```
+You might have seen "Warning: NAs introduced by coercion"; it's because when it says "no data" they are character strings that R couldn't turn into numeric. R coerced them to be NAs.
+
+Now let's rank the states based on the percentage of area with nitrate contamination, from highest to lowest.
+
+```{r}
+epa_tab %>% arrange(desc(percent))
+```
+
+Now that the data are numeric you can also perform calcuations of multiple columns, for example, the change in % of residents on a private well in 2015 vs 2005.
  
 ```{r}
 epa_tab <- epa_tab %>% 
   mutate(perc_change = private_perc_2015-private_perc_2005)
 ```
 
-## Data Cleaning
+### Data from Excel
 
 We are going to work with court records from an eviction court in Nebraska. The data was maintained by the administrative office of the courts, provided to the Flatwater Free Press by a researcher who requested it in the first place.
 
@@ -52,35 +116,57 @@ eviction_p2 <- read_xlsx("../data/evictions 2019-04-01 to 2019-12-31.xlsx") %>% 
 eviction_p3 <- read_xlsx("../data/evictions 04-01-2017 to 03-31-2019.xlsx") %>% clean_names()
 ```
 
-### Combining multiple datasets into one
+#### Combining multiple datasets into one
 
-We can easily combine data files in the same structure with the `bind_rows` command. Note that these data column types need to be consistent, so we can first make sure the date columns are read in as dates. Same with the zipcode columns.
+We can easily combine data files in the same structure with `bind_rows()`. Note that these data column types need to be consistent, so we can first make sure the date columns are read in as dates. 
 
-### Converting dates and numbers
-
-To truly work with it as a date, we need it in date format. There is a package called `lubridate` that we imported above that will help you work with dates. We'll take a look at the [lubridate cheatsheet](https://github.com/ireapps/R-for-data-analysis-2022/blob/main/docs/lubridate.pdf) to search for the right function.
-
-It's `ymd()`. When you're going to make a transformation, I recommend 1) testing it out first, and 2) creating a new column with the transformed data.
+We can look at the specific columns using `select()`. And if we don't want to type the column names for each, we can use `ends_with()` or `start_with()` to select those columns based on string pattern.
 
 ```{r}
+eviction_p1 %>% select(ends_with("date"))
+eviction_p2 %>% select(ends_with("date"))
+eviction_p3 %>% select(ends_with("date"))
+## read more about POSIX classes here:https://www.stat.berkeley.edu/~s133/dates.html
+```
+Same with the zipcode columns.
+```{r}
+eviction_p1 %>% select(starts_with("zip"))
+eviction_p2 %>% select(starts_with("zip"))
+eviction_p3 %>% select(starts_with("zip"))
+## read more about POSIX classes here:https://www.stat.berkeley.edu/~s133/dates.html
+```
+
+#### Converting dates and numbers
+
+[lubridate package](https://github.com/ireapps/R-for-data-analysis-2022/blob/main/docs/lubridate.pdf) has some handy functions for converting dates: such as `ymd()`, which parses dates in the year month date order. P.S. as long as formatting goes it works for all of these: "yyyy-mm-dd",""yyyy/mm/dd","yyyymmdd".
+
+```{r}
+eviction_p1 <- eviction_p1 %>%  
+  mutate(across(.cols = ends_with("date"), ymd)) %>% 
+  mutate(across(.cols = starts_with("zip"), as.double))
+
 eviction_p2 <- eviction_p2 %>%  
   mutate(across(.cols = ends_with("date"), ymd)) %>% 
   mutate(across(.cols = starts_with("zip"), as.double))
   
 eviction_p3 <- eviction_p3 %>%  
-  mutate(across(.cols = ends_with("date"), ymd)) %>% 
+  mutate(across(.cols = ends_with("date"), mdy)) %>% 
   mutate(across(.cols = starts_with("zip"), as.double))
+
 ```
 
-### Binding rows
+we need to use `mdy()` for eviction_p3 because the date columns have a different format from the other two: "mm/dd/yyyy" rather than "yyyy-mm-dd".
 
-Now that we've got a working date field,we can combine the data. I always make a new variable when I bind_rows, because if you accidentally overwrite a data frame when appending, you may create duplicate records. 
+#### Binding rows
+
+Now that we've got a working date field, we can combine the data and save to a new variable.
 
 ```{r}
 eviction <- eviction_p1 %>% bind_rows(eviction_p2) %>% bind_rows(eviction_p3) 
 ```
 
-Let's create a `file_year` field to show the filing year of 
+#### extracting year out of date
+We can extract the year from the `file_date` field with the `year()` function in lubridate.
 
 ```{r}
 eviction <- eviction %>% mutate(file_year = year(file_date))
@@ -90,52 +176,67 @@ eviction <- eviction %>% mutate(file_year = year(file_date))
 
 Now the fun begins. We need to isolate plaintiff in the case name and which ones are tied to Omaha Public Authority. 
 
-#### Split up a column
+##### Split up a string
+- `str_extract()`: extracts the first complete match from each string.
 
-There are two common ways to split up a column, one is to use a `str_extract()` function that extracts the strings before and after a delimiter, which tends to allow more flexibility in designing your own regular expression in case the delimiter pattern is not consistent, or you can use the `separate()` function and separate a column into (generally) 2. 
+You put [regular expressions](https://cran.r-project.org/web/packages/stringr/vignettes/regular-expressions.html) in the function as an argument to tell R what pattern to match. 
+
+- Find regex cheat sheet [here](https://evoldyn.gitlab.io/evomics-2018/ref-sheets/R_strings.pdf) 
+- Test your regex [here](https://regex101.com/)
+
+Look for these on the cheat sheet and try running the example code:
+- Match characters:
+  - `\\.`
+  - `\\s`
+  - `.` 
+- Anchors: 
+  - `^a`
+  - `a$`
+- Look-arounds:
+  - `a(?=c)`
+  - `(?<=b)a`
+- Quantifiers:
+  - `a+`
 
 ```{r}
 eviction <- eviction %>% 
   mutate(caption_up = str_to_upper(eviction$caption), .after = "caption") 
-
+## create a "caption_up" column after "caption" column, which is everything in "caption" column to upper case 
 
 eviction <- eviction %>% 
-  #double backlashes "\\" are an escape character, and not a literal character. 
-  mutate(plaintiff = caption_up %>% str_extract("^.+(?=\\sV\\.)") %>% str_trim(),
-    def = caption_up %>% str_extract("(?<=\\sV\\.).+$") %>% str_trim())
-
-# Option 2: use separate()
-eviction <- eviction %>% 
-# always set remove = F so that you don't lose the original column
-  separate(caption_up, into = c("plaintiff","def"), sep = "\\s*V.+", remove = F)
-# this didn't actually work for defendants but this does the job if you only care about the plaintiff
+  mutate(
+    plaintiff = caption_up %>% str_extract("^.+(?=\\sV\\.)") %>% str_trim(), 
+    def = caption_up %>% str_extract("(?<=\\sV\\.).+$") %>% str_trim()
+  )
+## plaintiff: look for start of string, what's followed by ' V.'
+## defendant: look for end of string, what's proceded by V.
 
 landlord_names <- eviction %>% tabyl(plaintiff)
 ```
 
-### Determine if string matches a pattern
+#### Determine if string matches a pattern
 
 We have 5,000+ distinct landlord names. Now we can use a `str_detect` function to capture the ones denoting the Omaha Housing Authority. We don't know what these are, so let's cast a wide net first. 
 
-But let's first narrow the data to everything in Douglas County. We can use the `str_detect` function to tell R to give us all the entries whose `court_name` variable contains the string "Douglas County"
+But let's first narrow the data to everything in Douglas County. We can use the `str_detect` function to tell R to give us all the entries whose `court_name` variable contains the string "Douglas County".
 
 ```{r}
 eviction <- eviction %>% 
-  #string goes first before variable name
   filter(court_name %>% str_detect("Douglas County"))
 ```
 
-To match a certain string pattern, we are going to use something called regular expressions, which is "a sequence of characters that specifies a match pattern in text."
-
-This website has a good cheat sheet for regex. https://www.rexegg.com/. I also use [this one](https://regex101.com/) to test if my regex works.
-
+Next we will look for every possible name variation of Omaha Housing Authority and generate a frequency table
 ```{r}
 oha <- eviction %>% 
   mutate(caption = str_to_upper(caption)) %>% 
   filter(caption %>% str_detect(str_to_upper("Omaha Housing Authority|OHA|Housing Authority|Housing Authority-City of Omaha|Housing Auth. City of Omaha|Housing Authority Of Omaha|Omaha Housing Auth|Housing Auth. City of Omaha|Housing Auhtority City of Omaha|Housing Authority City Omaha|^OMA")))
 
-# every name that seems like OHA
-oha_names <- oha %>% tabyl(plaintiff)
+## | is an alternator, means "OR", allows for searching multiple phrases;
+## ^ is an anchor, means "starts with"
+
+
+oha_names <- oha %>% tabyl(plaintiff) 
+## janitor::tabyl() generates a frequency table, Returns a data.frame with frequencies and percentages of the tabulated variable
 ```
 
 We can manually review the plaintiff names and see if they're truly OHA. 
@@ -149,37 +250,44 @@ oha %>% filter(plaintiff == "THE HOUSING AUTHORITY") %>%
   select(addr1, everything())
 ```
 
+Once we find the plaintiff names that are actually OHA, let's save them to an object.
 ```{r}
 oha_names$plaintiff[c(7:13,30:34,59:67)] -> oha_clean_names
 ```
 
+We will filter the plaintiff column based on if the plaintiff name matches any of names in oha_clean_names.
+
 ```{r}
 #cases we are confident that are filed by OHA 
 actual_oha <- oha %>% filter(plaintiff %in% oha_clean_names)
-# check the ones that are not OHA
+# the ones that are not OHA
 oha_out <- eviction %>% filter(plaintiff %out% oha_names$plaintiff)
 
 oha_out %>% tabyl(plaintiff) -> oha_out_names
 ```
 
-Now we have a clean data set of all OHA filings, let's see how many cases they filed each year.
+Now we have a clean data set of all OHA filings, let's see how many cases they filed each year, and the ratio of OHA filings out of all filings.
+
+`count()` in dplyr package lets you quickly count the unique values of one or more variables.
 
 ```{r}
+# OHA cases each year
 x <- actual_oha %>% count(file_year)
 names(x) <- c("filing_year","oha_cases")
 
 # Let's see how many cases in total are filed each year
 y <- eviction %>% count(file_year)
-
 names(y) <- c("filing_year","all_cases")
 
-z <- x %>% left_join(y)
+# join and calculate percent
+z <- x %>% left_join(y) %>% 
+  mutate(oha_perc = oha_cases/all_cases)
 
-z <- z %>% mutate(oha_perc = oha_cases/all_cases)
+z %>% head()
 ```
 
 
-## Working with Google Sheets
+### Working with Google Sheets
 
 Say you'd like to send this to another reporter in your newsroom for some spot checks to see if you've gotten everything right. An easy way to do this is connecting to your Google account and upload the sheet to a Google Drive. 
 
@@ -189,31 +297,34 @@ Let's create a sheet from scratch. You'll first need to authenticate your accoun
 
 ```{r}
 googlesheets4::gs4_auth()
-# first argument is the sheet name, second argument is the data frame, which will also be the sheet name
-googlesheets4::gs4_create("oha",sheets = actual_oha)
 ```
 
-You can then make changes in the Google sheet. Grab the ID of your sheet. It's in the address url. The string after"https://docs.google.com/spreadsheets/d/" 
+Next we will create a Googlesheet 
+```{r}
+googlesheets4::gs4_create("oha",sheets = actual_oha)
+# first argument is the sheet name, second argument is the data frame, which will also be the sheet name
+```
 
-Let's add the summary table to the same google sheet inanother tab.
+You can then make changes in the Google sheet. Grab the ID of your sheet. It's in the address url. The string after "https://docs.google.com/spreadsheets/d/" 
+
+Let's add the summary table to the same Google sheet in another tab.
 
 ```{r}
 sheet_write(z, ss = "1yyMApNbIVAWxvFPEw_11ZrkRQdip9to_UIs7GL4Op74",sheet = "smmary_table")
 ```
 
-## Data reformatting & reshaping
+### Data reformatting & reshaping
 
-### Adding description columns
+#### Adding description columns
 
 Next we'll take a look at `osha`.
 
 ```{r}
 osha <- read_csv("../data/osha.csv")
 
-# ore read from github repo
-#osha <- read_csv("https://raw.githubusercontent.com/ireapps/teaching-guide-R123/main/data/osha.csv")
+# or read from github repo
+# osha <- read_csv("https://raw.githubusercontent.com/ireapps/teaching-guide-R123/main/data/osha.csv")
 ```
-
 
 ```{r}
 glimpse(osha)
@@ -232,7 +343,9 @@ osha %>% mutate(estab_type_desc = case_when(
   TRUE ~ "Error"
 )) %>% 
   count(establishment_type, estab_type_desc)
+```
 
+```{r}
 # make it permanent
 osha <- osha %>% mutate(estab_type_desc = case_when(
   establishment_type==1 ~ "Not a Government Entity",
@@ -251,7 +364,6 @@ poverty <- read_csv("../data/poverty_original.csv")
 
 #poverty <- read_csv("https://raw.githubusercontent.com/ireapps/teaching-guide-R123/main/data/poverty_original.csv")
 ```
-
 
 In this example, each variable (i.e. `below50`, `below125`, etc) is its own row. To make it easier to do calculations by county, I transposed this data so that each variable would be its own column rather than row. I did that using `pivot_wider()` (for the sake of this example, I'm going to exclude the margin of error, or `moe`).
 
