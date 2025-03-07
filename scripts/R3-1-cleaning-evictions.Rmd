@@ -78,11 +78,11 @@ str(epa_tab)
 ```
 Some columns are characteristics, but to perform any sorting they need to be numeric. Let's use the following functions to convert them:
 
-- `mutate()`: 
+- mutate(): 
   - let you create new columns that are functions of existing variables
   - if you just want to create one new column, i.e. based on "area" column: epa_tab <- epa_tab %>% mutate(area = as.numeric(area))
   
-- `across()`: 
+- across(): 
   - makes it easy to apply the same transformation to multiple columns
 
 ```{r}
